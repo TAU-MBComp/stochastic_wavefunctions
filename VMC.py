@@ -8,6 +8,8 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 import numpy as np
+import matplotlib
+matplotlib.use('WebAgg')
 from matplotlib import pyplot as plt
 import argparse
 import time
@@ -72,7 +74,7 @@ interactions = args.interactions
 epsilon = 1.e-6
 n_layers = 4
 layer_size = 128
-activation_function = "tanh"
+activation_function = "elu"
 
 if m[0:3] == "2Ha":
     d = int(m[3:])*2
@@ -100,7 +102,7 @@ elif m[0:3] == "1Ha":
 
     @tf.function(jit_compile=True)
     def potential(x):
-        return 0.5 *  tf.reduce_sum(x ** 2, axis=1, keepdims=True)
+        return 0.5 * tf.reduce_sum(x ** 2, axis=1, keepdims=True)
 
 
 
@@ -388,27 +390,25 @@ def run():
         T = (-1 / 2) * d22(x)
         O = V * y ** 2 + T * y
         N = y ** 2
-        weight = y ** 2
+        weight = y ** 2 + epsilon
         return tf.reduce_mean(O / weight) / (tf.reduce_mean(N / weight) + epsilon)
 
     @tf.function(experimental_relax_shapes=True)
     def symmetry_loss(x, y):
         new_x, sign = reorder_more_d(x)
         new_y = model(new_x)
-        return tf.reduce_mean(tf.abs(y - sign * new_y) / (tf.abs(y) + tf.abs(new_y) + epsilon))
+        return tf.reduce_mean((y - sign * new_y)**2.) /tf.reduce_mean(y**2. + epsilon)
+
 
     @tf.function(experimental_relax_shapes=True)
     def total_loss(x, y):
-        return energy_loss(x, y) + 1.e4 * symmetry_loss(x, y)
+            return symmetry_loss(x, y)*1.e3 + energy_loss(x, y)
 
 
     @tf.function(jit_compile=True)
     def target(x):
         psi_sqrd = model(x) ** 2
-        max_cond = tf.math.reduce_max(x, axis=1, keepdims=True) > x_max
-        min_cond = tf.math.reduce_min(x, axis=1, keepdims=True) < x_min
-        cond = tf.logical_or(min_cond, max_cond)
-        return tf.math.log(psi_sqrd * (1. - tf.cast(cond, tf.float32)))
+        return tf.math.log(psi_sqrd)
 
     @tf.function(experimental_relax_shapes=True)
     def exact_metropolis(n):
@@ -422,7 +422,7 @@ def run():
         return sample[0]
 
     epochs = 1000
-    batches = 1
+    batches = 10
     initial_lr = 0.0001
     # opt = tf.optimizers.Adam()
     # opt = tfp.optimizer.VariationalSGD(
@@ -432,32 +432,72 @@ def run():
     # )
     opt = keras.optimizers.Adam(0.01)
     x = tf.random.uniform([n_samples, d], maxval=x_max, minval=x_min)
+    loss_historysym = []
+
     #metropolis(n_samples, 500)
-    loss_history = [energy_loss(x, model(x)).numpy()]
+    batches = 10
+    # model.compile(loss=symmetry_loss, optimizer=opt, metrics=['mae', 'mean_squared_error'])
+    # try:  # If it's too long, one can stop the training with ctrl+c and still get a graph
+    #     aa = 0
+    #     for i in range(epochs):
+    #         print(i)
+    #         aa += 1
+    #         x = exact_metropolis(100)
+    #         history_callback = model.fit(x, x, epochs=1, batch_size=n_samples // batches, shuffle=False)
+    #         loss_historysym.append(history_callback.history["loss"])
+    #         # energyi = energy_loss(x, model(x)).numpy()
+    #         # print(energyi)
+    #         # loss_history.append(energyi)
+    #         if loss_historysym[-1][0] < 1.e-4:
+    #             break
+    #         # lr = initial_lr * tf.exp(-i / 100)
+    #         # K.set_value(model.optimizer.learning_rate, lr)
+    # except KeyboardInterrupt:
+    #     pass
+    # weights = model.get_weights()
+    # # opt = tfp.optimizer.VariationalSGD(
+    # #     n_samples // batches, n_samples, max_learning_rate=1.e-2,
+    # #     preconditioner_decay_rate=0.95, burnin=1, burnin_max_learning_rate=1.e-6,
+    # #     use_single_learning_rate=False, name=None
+    # # )
     model.compile(loss=total_loss, optimizer=opt, metrics=['mae', 'mean_squared_error'])
+    # model.set_weights(weights)
+    batches = 10
+    loss_history = [energy_loss(x, model(x)).numpy()]
     try:  # If it's too long, one can stop the training with ctrl+c and still get a graph
         for i in range(epochs):
             print(i)
+            # K.set_value(model.optimizer.learning_rate, 1.e-3)
             x = exact_metropolis(500)
             history_callback = model.fit(x, x, epochs=1, batch_size=n_samples // batches, shuffle=False)
             energyi = energy_loss(x, model(x)).numpy()
             print(energyi)
             loss_history.append(energyi)
+            loss_historysym.append(1.e-3*(history_callback.history["loss"]-energyi))
             # lr = initial_lr * tf.exp(-i / 100)
             # K.set_value(model.optimizer.learning_rate, lr)
     except KeyboardInterrupt:
         pass
+    plt.semilogy(loss_historysym)
+    plt.axhline(y=0., color='r', linestyle='--', alpha=0.5)
+    # plt.axvline(x=aa, color='b', linestyle='--', alpha=0.5)
+    plt.xlabel('Epochs')
+    plt.ylabel("Symmetry")
+    plt.savefig('symmetry.pdf')
+    plt.show()
+    plt.clf()
 
     plt.plot(loss_history, label='Energy')
     plt.axhline(y=real_energy, color='r', linestyle='--', alpha=0.5)
     plt.xlabel('Epochs')
     plt.ylabel(r'$<E>$')
     plt.savefig('energy.pdf')
+    plt.show()
     plt.clf()
-
-    a = np.linspace(x_min, x_max, n_samples)
-    x = tf.reshape(tf.Variable(a, dtype=float), [n_samples, 1])
-    y = (model(x)).numpy()[:, 0]
-    plt.plot(x.numpy(), y)
-    plt.savefig('plot.pdf')
+    if d==1:
+        a = np.linspace(x_min, x_max, n_samples)
+        x = tf.reshape(tf.Variable(a, dtype=float), [n_samples, 1])
+        y = (model(x)).numpy()[:, 0]
+        plt.plot(x.numpy(), y)
+        plt.savefig('plot.pdf')
 run()
