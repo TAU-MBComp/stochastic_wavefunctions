@@ -14,6 +14,87 @@ import os
 from os.path import join as pjoin
 
 
+@tf.function(jit_compile=True)
+def target(x):
+    psi_sqrd = model(x) ** 2
+    return tf.math.log(psi_sqrd)
+
+
+@tf.function(experimental_relax_shapes=True)
+def exact_metropolis(n):
+    x = tf.random.uniform([n_samples, d], minval=x_min, maxval=x_max)
+    sample = tfp.mcmc.sample_chain(
+        num_results=1,
+        current_state=x,
+        kernel=tfp.mcmc.RandomWalkMetropolis(target),
+        num_burnin_steps=n,
+        trace_fn=None, parallel_iterations=1)
+    return sample[0]
+
+@tf.function(experimental_relax_shapes=True, jit_compile=True)
+def parity(x, spin):
+    result = 1.
+    range_for = tf.range(spin, dtype=tf.int32)
+    for i in range(spin):
+        for j in range(spin):
+            if i < j:
+                x_i = x[:, i:i + 1]
+                x_j = x[:, j:j + 1]
+                in_i = tf.gather(range_for, x_i)
+                in_j = tf.gather(range_for, x_j)
+                result = result * ((tf.gather(x, in_i, batch_dims=1) - tf.gather(x, in_j, batch_dims=1)) / (x_i - x_j))
+    return result
+
+@tf.function(experimental_relax_shapes=True)
+def reorder_more_d(x):
+    n = tf.shape(x)[0]
+    if spin_up > 0:
+        x_up = x[:, 0 * (d // p):(d // p) * spin_up]
+        new_shaped_x_up = tf.reshape(x_up, [n, spin_up, space_d])
+        s_up = tf.reduce_sum(new_shaped_x_up * (1000.**tf.reverse(tf.range(space_d, dtype=tf.float32), [0])), axis=2)
+        val, idx_up = tf.nn.top_k(s_up, spin_up)
+        new_x_up = tf.reshape(tf.gather(new_shaped_x_up, tf.expand_dims(idx_up, axis=-1), batch_dims=1), [n, spin_up*space_d])
+        new_parity_up = tf.cast(parity(idx_up, spin_up), tf.float32)
+
+    if spin_down > 0:
+        x_down = x[:, spin_up * (d // p):]
+        new_shaped_x_down = tf.reshape(x_down, [n, spin_down, space_d])
+        s_down = tf.reduce_sum(new_shaped_x_down * (1000.**tf.reverse(tf.range(space_d, dtype=tf.float32), [0])), axis=2)
+        val, idx_down = tf.nn.top_k(s_down, spin_down)
+        new_x_down = tf.reshape(tf.gather(new_shaped_x_down, tf.expand_dims(idx_down, axis=-1), batch_dims=1), [n, spin_down*space_d])
+        new_parity_down = tf.cast(parity(idx_down, spin_down), tf.float32)
+
+        new_x = tf.concat([new_x_up, new_x_down], axis=1)
+        new_parity = new_parity_down * new_parity_up
+    else:
+        new_x = new_x_up
+        new_parity = new_parity_up
+    return new_x, new_parity
+
+class symmetry_sampler(keras.utils.Sequence):
+    def __init__(self, x_set, y_set, batch_size):
+        self.x, self.y = x_set, y_set
+        self.batch_size = batch_size
+
+    def __len__(self):
+        return math.ceil(len(self.x) / self.batch_size)
+
+    def __getitem__(self, idx):
+        init_x = self.x[idx * self.batch_size:(idx + 1) * self.batch_size, :]
+        init_y = self.y[idx * self.batch_size:(idx + 1) * self.batch_size, :]
+        batch_x, sign_y = reorder_more_d(init_x)
+        batch_y = init_y * sign_y
+        return np.array(batch_x), np.array(batch_y)
+
+# dataset = tf.data.Dataset.from_generator(symmetry_sampler,
+#                                          output_signature=(
+#                                              tf.TensorSpec(shape=(None, d), dtype=tf.float32),
+#                                              tf.TensorSpec(shape=(None, 1), dtype=tf.float32)), args=(x_fit, y_fit, batch_size))
+
+
+# history_callback = model.fit(symmetry_sampler(x, y, batch_size), epochs=epochs, batch_size=batch_size, shuffle=True)
+
+
 class GaussianLayer(tf.keras.layers.Layer):
     def __init__(self, n_particles, dim_physical, sigma_init):
         super(GaussianLayer, self).__init__()
