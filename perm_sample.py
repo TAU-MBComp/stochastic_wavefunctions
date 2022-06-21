@@ -57,6 +57,14 @@ class symmetry_sampler(keras.utils.Sequence):
 
 
 
+val_percent = 0.05
+cutoff = int((1.-val_percent)*n_samples)
+x_fit = x[:cutoff, :]
+y_fit = y[:cutoff, :]
+x_val = x[cutoff:, :]
+y_val = y[cutoff:, :]
+batch_size = 1000
+epochs = 1000
 dataset = tf.data.Dataset.from_generator(symmetry_sampler,
                                          output_signature=(
                                              tf.TensorSpec(shape=(None, d), dtype=tf.float32),
