@@ -25,8 +25,8 @@ if __name__ == '__main__':
 	'mse_t' : mse_t_nn,
     }
     if bosonic:
-        output =  "neural_{}_{}d_{}N_U={}.pkl".format('bosons',dim_physical, n_particles, U)
+        output =  "cutoff_{}_neural_{}_{}d_{}N_U={}.pkl".format(cutoff, 'bosons', dim_physical, n_particles, U)
         pickle.dump(results, open( output, "wb" ))
     else:
-        output =  "neural_{}_{}d_{}N_U={}.pkl".format('fermions', dim_physical, n_particles, U)
+        output =  "cutoff_{}_neural_{}_{}d_{}N_U={}.pkl".format(cutoff, 'fermions', dim_physical, n_particles, U)
         pickle.dump(results, open( output, "wb" ))
