@@ -16,6 +16,7 @@ import time
 import tensorflow_probability as tfp
 from tensorflow.keras import backend as K
 import datetime
+import pickle as pkl
 
 parser = argparse.ArgumentParser(description='Run a VMC simulation')
 parser.add_argument(
@@ -72,7 +73,7 @@ m = args.mode
 interactions = args.interactions
 
 epsilon = 1.e-6
-n_layers = 4
+n_layers = 3
 layer_size = 128
 activation_function = "elu"
 
@@ -396,10 +397,17 @@ def run():
     @tf.function(experimental_relax_shapes=True)
     def symmetry_loss(x, y):
         new_x, sign = reorder_more_d(x)
-        new_y = model(new_x)
-        return tf.reduce_mean((y - sign * new_y)**2.) /tf.reduce_mean(y**2. + epsilon)
+        new_y = sign * model(new_x)
+        return tf.reduce_mean((y - new_y)**2.) /tf.reduce_mean(y**2. + epsilon)
 
-
+    # @tf.function(experimental_relax_shapes=True)
+    # def symmetry_loss(x, y):
+    #     new_y = tf.zeros_like(y)
+    #     for i in range(10):
+    #         new_x, sign = reorder_more_d(x)
+    #         new_y += sign * model(new_x)
+    #     new_y = new_y / 10.
+    #     return tf.reduce_mean((y - new_y)**2.) / tf.reduce_mean(y**2. + epsilon)
     @tf.function(experimental_relax_shapes=True)
     def total_loss(x, y):
             return symmetry_loss(x, y)*1.e3 + energy_loss(x, y)
@@ -411,8 +419,8 @@ def run():
         return tf.math.log(psi_sqrd)
 
     @tf.function(experimental_relax_shapes=True)
-    def exact_metropolis(n):
-        x = tf.random.uniform([n_samples, d], minval=x_min, maxval=x_max)
+    def exact_metropolis(N, n):
+        x = tf.random.uniform([N, d], minval=x_min, maxval=x_max)
         sample = tfp.mcmc.sample_chain(
             num_results=1,
             current_state=x,
@@ -421,7 +429,7 @@ def run():
             trace_fn=None, parallel_iterations=1)
         return sample[0]
 
-    epochs = 1000
+    epochs = 5000
     batches = 10
     initial_lr = 0.0001
     # opt = tf.optimizers.Adam()
@@ -430,7 +438,7 @@ def run():
     #     preconditioner_decay_rate=0.95, burnin=25, burnin_max_learning_rate=1.e-6,
     #     use_single_learning_rate=False, name=None
     # )
-    opt = keras.optimizers.Adam(0.01)
+    opt = keras.optimizers.Adam(0.001)
     x = tf.random.uniform([n_samples, d], maxval=x_max, minval=x_min)
     loss_historysym = []
 
@@ -462,13 +470,13 @@ def run():
     # # )
     model.compile(loss=total_loss, optimizer=opt, metrics=['mae', 'mean_squared_error'])
     # model.set_weights(weights)
-    batches = 10
+    batches = 1
     loss_history = [energy_loss(x, model(x)).numpy()]
     try:  # If it's too long, one can stop the training with ctrl+c and still get a graph
         for i in range(epochs):
             print(i)
             # K.set_value(model.optimizer.learning_rate, 1.e-3)
-            x = exact_metropolis(500)
+            x = exact_metropolis(n_samples, 500)
             history_callback = model.fit(x, x, epochs=1, batch_size=n_samples // batches, shuffle=False)
             energyi = energy_loss(x, model(x)).numpy()
             print(energyi)
@@ -478,12 +486,33 @@ def run():
             # K.set_value(model.optimizer.learning_rate, lr)
     except KeyboardInterrupt:
         pass
+
+    def energy(x, y, num):
+        V = full_potential(x)
+        d2_list = []
+        for i in range(int(tf.math.ceil(num / 10000))):
+            d2_list.append(d2(x[i * 10000:(i + 1) * 10000, :]))
+        dd2 = tf.concat(d2_list, axis=0)
+        T = -0.5 * dd2
+        O = V * y ** 2 + T * y
+        N = y ** 2 + epsilon
+        weight = y ** 2 + epsilon
+        part1 = O / weight
+        part2 = N / weight
+        en = tf.reduce_mean(part1) / (tf.reduce_mean(part2))
+        err = (1. / num) ** 0.5 * tf.math.reduce_std(part1)
+        return en, err
+
+    x = exact_metropolis(100000, 500)
+    energy_mean, err = energy(x, model(x), 100000)
+    print(energy_mean, err)
+
     plt.semilogy(loss_historysym)
     plt.axhline(y=0., color='r', linestyle='--', alpha=0.5)
     # plt.axvline(x=aa, color='b', linestyle='--', alpha=0.5)
     plt.xlabel('Epochs')
     plt.ylabel("Symmetry")
-    plt.savefig('symmetry.pdf')
+    plt.savefig('symmetry'+m+'.pdf')
     plt.show()
     plt.clf()
 
@@ -491,9 +520,12 @@ def run():
     plt.axhline(y=real_energy, color='r', linestyle='--', alpha=0.5)
     plt.xlabel('Epochs')
     plt.ylabel(r'$<E>$')
-    plt.savefig('energy.pdf')
+    plt.savefig('energy'+m+'.pdf')
     plt.show()
     plt.clf()
+    data = [loss_historysym, loss_history, energy_mean, err]
+    with open('data' + m + '.pkl', 'wb') as f:
+        pkl.dump(data, f)
     if d==1:
         a = np.linspace(x_min, x_max, n_samples)
         x = tf.reshape(tf.Variable(a, dtype=float), [n_samples, 1])
