@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 import os
-
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -12,11 +10,10 @@ import matplotlib
 matplotlib.use('WebAgg')
 from matplotlib import pyplot as plt
 import argparse
-import time
 import tensorflow_probability as tfp
-from tensorflow.keras import backend as K
-import datetime
 import pickle as pkl
+from sympy.combinatorics import Permutation
+import itertools
 
 parser = argparse.ArgumentParser(description='Run a VMC simulation')
 parser.add_argument(
@@ -104,57 +101,70 @@ n_layers = args.layer_number
 activation_function = args.activation_function
 epochs = args.number_of_epochs
 
-epsilon = 1.e-6 #for interactions
+epsilon = 1.e-6  # for interactions
 
-
-
-if m[0:3] == "1Ha":
+if m[0:3] == "1Ha":  # relevant system properties
     d = int(m[3:])
     p = int(m[3:])
     spin_up = args.spin_up
     spin_down = args.spin_down
-    if p != spin_up+spin_down:
+    if p != spin_up + spin_down:
         raise ValueError("Number of fermions doesn't match the number of spin up particles and spin down particles")
 
     nuclei = []
-    real_energy = 0.5*spin_up**2 + 0.5*spin_down**2
+    real_energy = 0.5 * spin_up ** 2 + 0.5 * spin_down ** 2
+
 
     @tf.function(jit_compile=True)
     def potential(x):
         return 0.5 * tf.reduce_sum(x ** 2, axis=1, keepdims=True)
 
-
-space_d = d//p
+space_d = d // p
 
 
 @tf.function(jit_compile=True, experimental_relax_shapes=True)
-def dis(r1, r2=tf.zeros(d // p)):
+def dis(r1, r2=tf.zeros(d // p)):  # normal of a vector
     return tf.sqrt(tf.reduce_sum((r1 - r2) ** 2, axis=1, keepdims=True)) + epsilon
 
 
-@tf.function(experimental_relax_shapes=True, jit_compile=True)
-def parity(x, spin):
-    result = 1.
-    range_for = tf.range(spin, dtype=tf.int32)
-    for i in range(spin):
-        for j in range(spin):
-            if i < j:
-                x_i = x[:, i:i + 1]
-                x_j = x[:, j:j + 1]
-                in_i = tf.gather(range_for, x_i)
-                in_j = tf.gather(range_for, x_j)
-                result = result * ((tf.gather(x, in_i, batch_dims=1) - tf.gather(x, in_j, batch_dims=1)) / (x_i - x_j))
-    return result
+# symmetry functions
+perm_up = list(itertools.permutations(range(spin_up)))
+pairity_up = []
+for i in perm_up:
+    pairity_up.append([Permutation(i).parity()])
+pairity_up = tf.constant((-1.) ** np.array(pairity_up))
+perm_up = tf.constant(perm_up, dtype=tf.int32)
+
+perm_down = list(itertools.permutations(range(spin_down)))
+pairity_down = []
+for i in perm_down:
+    pairity_down.append([Permutation(i).parity()])
+pairity_down = tf.constant((-1.) ** np.array(pairity_down))
+perm_down = tf.constant(perm_down, dtype=tf.int32)
+
+blank_perm = np.array([range(d // p)])
+blank_perm = tf.cast(tf.tile(blank_perm, [1, p]), tf.int32)
+pairity = tf.tile(pairity_up, [perm_down.shape[0], 1]) * tf.repeat(pairity_down, perm_up.shape[0], axis=0)
+perm = tf.concat([tf.tile(perm_up, [perm_down.shape[0], 1]), tf.repeat(perm_down, perm_up.shape[0], axis=0) + spin_up], axis=1)
+
+
+@tf.function(jit_compile=True, experimental_relax_shapes=True)
+def permute(x): # returns random permuted state
+    sample_perms = tf.random.uniform([tf.shape(x)[0], ], maxval=tf.shape(perm)[0], dtype=tf.int32)
+    perms = tf.gather(perm, sample_perms)
+    axis2 = d // p * tf.repeat(perms, d // p, axis=1)
+    x_perm = tf.gather(x, blank_perm + axis2, axis=1, batch_dims=1)
+    y_sign = tf.gather(pairity, sample_perms)
+    return x_perm, tf.cast(y_sign, tf.float32)
 
 
 @tf.keras.utils.register_keras_serializable()
-class boundary(keras.layers.Layer):
+class boundary(keras.layers.Layer):  # boundary layer
     def __init__(self, name=None, **kwargs):
         super(boundary, self).__init__(name=name)
         super(boundary, self).__init__(**kwargs)
         self.sigma = tf.Variable(initial_value=2., trainable=True)
         self.a = tf.Variable(initial_value=1., trainable=True)
-
 
     def get_config(self):
         config = super().get_config()
@@ -162,13 +172,13 @@ class boundary(keras.layers.Layer):
 
     @tf.function(jit_compile=True)
     def call(self, x):
-        return self.a * tf.exp(-(tf.reduce_sum(x**2., axis=1, keepdims=True)) / self.sigma)
+        return self.a * tf.exp(-(tf.reduce_sum(x ** 2., axis=1, keepdims=True)) / self.sigma)
 
 
-def build_model(layers_num, size_num):
+def build_model(layers_num, size_num):  # building the model
     inputs = keras.Input(shape=([d, ]), name="input")
     hidden = layers.Dense(size_num, activation='elu', kernel_initializer='uniform')(inputs)
-    for i in range(layers_num-1):
+    for i in range(layers_num - 1):
         hidden = layers.Dense(size_num, activation='elu', kernel_initializer='uniform')(hidden)
     output = layers.Dense(1, activation='linear')(hidden)
     outputs = layers.multiply([output, boundary()(inputs)])
@@ -177,7 +187,7 @@ def build_model(layers_num, size_num):
 
 
 @tf.function(jit_compile=True, experimental_relax_shapes=True)
-def body_potential(x):
+def body_potential(x):  # coulomb interactions
     value = 0.
     for i in range(p):  # e-e
         for j in range(p):
@@ -185,32 +195,6 @@ def body_potential(x):
                 value += 1. / dis(x[:, i * d // p:(i + 1) * d // p], x[:, j * d // p:(j + 1) * d // p])
     return value
 
-
-@tf.function(experimental_relax_shapes=True)
-def reorder_more_d(x):
-    n = tf.shape(x)[0]
-    if spin_up > 0:
-        x_up = x[:, 0 * (d // p):(d // p) * spin_up]
-        new_shaped_x_up = tf.reshape(x_up, [n, spin_up, space_d])
-        s_up = tf.reduce_sum(new_shaped_x_up * (1000.**tf.reverse(tf.range(space_d, dtype=tf.float32), [0])), axis=2)
-        val, idx_up = tf.nn.top_k(s_up, spin_up)
-        new_x_up = tf.reshape(tf.gather(new_shaped_x_up, tf.expand_dims(idx_up, axis=-1), batch_dims=1), [n, spin_up*space_d])
-        new_parity_up = tf.cast(parity(idx_up, spin_up), tf.float32)
-
-    if spin_down > 0:
-        x_down = x[:, spin_up * (d // p):]
-        new_shaped_x_down = tf.reshape(x_down, [n, spin_down, space_d])
-        s_down = tf.reduce_sum(new_shaped_x_down * (1000.**tf.reverse(tf.range(space_d, dtype=tf.float32), [0])), axis=2)
-        val, idx_down = tf.nn.top_k(s_down, spin_down)
-        new_x_down = tf.reshape(tf.gather(new_shaped_x_down, tf.expand_dims(idx_down, axis=-1), batch_dims=1), [n, spin_down*space_d])
-        new_parity_down = tf.cast(parity(idx_down, spin_down), tf.float32)
-
-        new_x = tf.concat([new_x_up, new_x_down], axis=1)
-        new_parity = new_parity_down * new_parity_up
-    else:
-        new_x = new_x_up
-        new_parity = new_parity_up
-    return new_x, new_parity
 
 
 def run():
@@ -230,7 +214,7 @@ def run():
         return tf.reduce_sum(grad2y, axis=1, keepdims=True)
 
     @tf.function(experimental_relax_shapes=True)
-    def energy_loss(x, y):
+    def energy_loss(x, y): # monte carlo integration
         V = interactions * body_potential(x) + potential(x)
         T = (-1 / 2) * d22(x)
         O = V * y ** 2 + T * y
@@ -239,14 +223,14 @@ def run():
         return tf.reduce_mean(O / weight) / (tf.reduce_mean(N / weight) + epsilon)
 
     @tf.function(experimental_relax_shapes=True)
-    def symmetry_loss(x, y):
-        new_x, sign = reorder_more_d(x)
+    def symmetry_loss(x, y): # loss function to punish for un-symmetry
+        new_x, sign = permute(x)
         new_y = sign * model(new_x)
-        return tf.reduce_mean((y - new_y)**2.) /tf.reduce_mean(y**2. + epsilon)
+        return tf.reduce_mean((y - new_y) ** 2.) / tf.reduce_mean(y ** 2. + epsilon)
 
     @tf.function(experimental_relax_shapes=True)
     def total_loss(x, y):
-            return symmetry_loss(x, y)*1.e3 + energy_loss(x, y)
+        return symmetry_loss(x, y) * 1.e3 + energy_loss(x, y)
 
     @tf.function(jit_compile=True)
     def target(x):
@@ -254,7 +238,7 @@ def run():
         return tf.math.log(psi_sqrd)
 
     @tf.function(experimental_relax_shapes=True)
-    def exact_metropolis(N, n):
+    def exact_metropolis(N, n):  # metropolis for VMC
         x = tf.random.uniform([N, d], minval=x_min, maxval=x_max)
         sample = tfp.mcmc.sample_chain(
             num_results=1,
@@ -279,11 +263,11 @@ def run():
             energyi = energy_loss(x, model(x)).numpy()
             print(energyi)
             loss_history.append(energyi)
-            loss_historysym.append(1.e-3*(history_callback.history["loss"]-energyi))
+            loss_historysym.append(1.e-3 * (history_callback.history["loss"] - energyi))
     except KeyboardInterrupt:
         pass
 
-    def energy(x, y, num):
+    def energy(x, y, num): # energy with error
         V = interactions * body_potential(x) + potential(x)
         d2_list = []
         for i in range(int(tf.math.ceil(num / 10000))):
@@ -307,16 +291,18 @@ def run():
     plt.axhline(y=0., color='r', linestyle='--', alpha=0.5)
     plt.xlabel('Epochs')
     plt.ylabel("Symmetry")
-    plt.savefig('symmetry'+m+'.pdf')
+    plt.savefig('symmetry' + m + '.pdf')
     plt.clf()
 
     plt.plot(loss_history, label='Energy')
     plt.axhline(y=real_energy, color='r', linestyle='--', alpha=0.5)
     plt.xlabel('Epochs')
     plt.ylabel(r'$<E>$')
-    plt.savefig('energy'+m+'.pdf')
+    plt.savefig('energy' + m + '.pdf')
     plt.clf()
     data = [loss_historysym, loss_history, energy_mean, err]
     with open('data' + m + '.pkl', 'wb') as f:
         pkl.dump(data, f)
+
+
 run()
