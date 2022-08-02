@@ -11,10 +11,10 @@ from sample_distribution_Nd import sample_uniform, sample_from_distribution, vec
 
 
 def perm_parity(lst):
-    '''\
+    """
     Given a permutation of the digits 0..N in order as a list,
     returns its parity (or sign): +1 for even parity; -1 for odd.
-    '''
+    """
     parity = 1
     for i in range(0, len(lst) - 1):
         if lst[i] != i:
@@ -50,7 +50,7 @@ def eigenfunction_samples(n, x, n_particles, dim_physical, offset, hbar, m,
                             n_p] = psi_single_particle(x_p[:, d], n + p[n_p])
                     else:
                         row[d, n_p] = psi_single_particle(x_p[:, d], n)
-        if bosonic == 1:
+        if (bosonic):
             row = np.prod(np.prod(row, axis=0), axis=0)
         else:
             row = parity * np.prod(np.prod(row, axis=0), axis=0)
@@ -187,10 +187,10 @@ if __name__ == '__main__':
     m = 1.0
     omega = 1.0
     tmax = 1.0
-    xmax = ymax = zmax = 5.0
+    xmax = 5.0
     offset = [0.0, -0.0]
     n_t = 10
-    n_x = n_y = n_z = 100
+    n_x = 100
     bosonic = 0
     n_particles = 2
     dim_physical = 1
@@ -213,12 +213,5 @@ if __name__ == '__main__':
     decorrelation_steps = 5
     samples = vec_sample_from_distribution(P0, x0, nsamples,
                                            decorrelation_steps, xmax)
-    psi0 = eigenfunction_samples(0,
-                                 samples,
-                                 n_particles,
-                                 dim_physical,
-                                 offset,
-                                 hbar,
-                                 m,
-                                 omega,
-                                 bosonic=bosonic)
+    psi0 = eigenfunction_samples(0, samples, n_particles, dim_physical, offset,
+                                 hbar, m, omega, bosonic)

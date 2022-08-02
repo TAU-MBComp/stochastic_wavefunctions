@@ -18,9 +18,12 @@ from tensorflow.keras.optimizers import SGD
 from datetime import datetime
 import os
 from os.path import join as pjoin
+"""
+Given the sample points x and the values of the wavcefunction psi, generate permutations according ot the symmetry of the wavefunction.  
+"""
 
 
-def permute(x_init, y_init, perm, parity, d, n_particles):
+def permute(x_init, y_init, perm, parity, d, n_particles, bosonic):
     x_init = x_init.reshape(x_init.shape[0], n_particles, d)
     num_perm = len(parity)
     x_perm = np.copy(x_init)
@@ -29,9 +32,17 @@ def permute(x_init, y_init, perm, parity, d, n_particles):
         permutation = list(perm[p])
         x_p = np.take(x_init, permutation, axis=1)
         x_perm = np.append(x_perm, x_p, axis=0)
-        y_p = (-1)**(parity[p][0]) * y_init
+        if (bosonic):
+            y_p = (1)**(parity[p][0]) * y_init
+        else:
+            y_p = (-1)**(parity[p][0]) * y_init
         y_perm = np.append(y_perm, y_p)
     return x_perm.reshape(x_perm.shape[0], d * n_particles), y_perm
+
+
+"""
+Use Gaussian function to create a boundary layer in order to suppress the fit function at the edges. 
+"""
 
 
 class GaussianLayer(tf.keras.layers.Layer):
@@ -57,6 +68,11 @@ class GaussianLayer(tf.keras.layers.Layer):
             return tf.reduce_prod(gaussian(x), axis=2, keepdims=False)
 
         return tf.reduce_prod(psi(r), axis=1, keepdims=False)
+
+
+"""
+Create neural network and train it to fit a multidimensional wavefunction. 
+"""
 
 
 def neural_fit(x,
@@ -134,8 +150,12 @@ def neural_fit(x,
     def fitfunc(x, batch_size=128):
         return model.predict(x, batch_size)
 
+    """
+    Use tensorflow automatic gradient to calculate the Lagrangian of the fit function.  
+    """
+
     @tf.function(experimental_relax_shapes=True)
-    def d22(x):
+    def d2_fitfunc(x):
         _x = tf.unstack(x, axis=1)
         _x_ = [tf.expand_dims(i, axis=1) for i in _x]
         _x2 = tf.transpose(tf.stack(_x_))[0]
@@ -148,11 +168,16 @@ def neural_fit(x,
         grad2 = tf.reduce_sum(grad2y, axis=1, keepdims=True)
         return grad2
 
-    return fitfunc, d22
+    return fitfunc, d2_fitfunc
 
 
 if __name__ == '__main__':
-    # Parameters:
+    from sample_distribution_Nd import sample_mixed
+    import stochastic_propagation_Nd
+    import sample_wavefunction_Nd
+    import harmonic_oscillator_Nd as ho
+
+    # numerical parameters
     nsamples = 5000
     epochs = 200
     batch_size = 128
@@ -160,18 +185,12 @@ if __name__ == '__main__':
     h = 1e-2
     n_layers = 2
     layer_size = 4 * 128
-    bosonic = 0
-    iteration = 0
-    n_particles = 2
-    dim_physical = 2
+    bosonic = False
     perm_subset = 2
     load_weights = 0
+    iteration = 0
 
-    from sample_distribution_Nd import sample_mixed
-    import stochastic_propagation_Nd
-    import sample_wavefunction_Nd
-    import harmonic_oscillator_Nd as ho
-
+    # physical parameters
     U = 0.0
     nu = 0.001
     hbar = 1.0
@@ -180,6 +199,8 @@ if __name__ == '__main__':
     tmax = 1.0
     n_t = 100
     offset = [-1.0, 1.0]
+    n_particles = 2
+    dim_physical = 2
 
     t = -1j * np.linspace(0, tmax, n_t)
     dt = t[1] - t[0]
@@ -231,7 +252,6 @@ if __name__ == '__main__':
     start = datetime.now()
     samples = sample_mixed(P0, x0, step, x_max, nsamples, decorrelation_steps,
                            uniform_ratio)
-    #samples = sample_from_distribution(P0, x0, step, nsamples, decorrelation_steps)
     print("sampling time = ", datetime.now() - start)
     energy_exact, mse_exact = sample_wavefunction_Nd.vec_sample_energy(
         wavefunction, wavefunction_d2, Hpsi, x0, step, nsamples,
@@ -253,7 +273,8 @@ if __name__ == '__main__':
     subset.sort()
     perm = [perm[i] for i in subset]
     parity = [parity[i] for i in subset]
-    x, y = permute(samples, psi, perm, parity, dim_physical, n_particles)
+    x, y = permute(samples, psi, perm, parity, dim_physical, n_particles,
+                   bosonic)
 
     # Fit a neural network to it:
     start = datetime.now()

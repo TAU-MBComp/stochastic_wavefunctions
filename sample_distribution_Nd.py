@@ -8,7 +8,7 @@ def vec_sample_from_distribution(P,
                                  nsamples,
                                  decorrelation_steps,
                                  xmax=float('inf')):
-    vec_batch = 100  #100
+    vec_batch = 100
     x = np.random.rand(vec_batch, x0.shape[0])
     step = np.full(x.shape, xmax)
     Px = P(x)
@@ -93,7 +93,6 @@ def sample_mixed(P,
 
 if __name__ == '__main__':
     import numpy as np, matplotlib
-    matplotlib.use('Agg')
     from matplotlib import pyplot as plt
     step = np.array([1.0])
     x0 = np.array([0.0])
@@ -120,7 +119,6 @@ if __name__ == '__main__':
 
     samples = sample_from_distribution(P2, x0, step, nsamples,
                                        decorrelation_steps)
-    print(np.shape(samples))
     H, xedges, yedges = np.histogram2d(samples[:, 0], samples[:, 1], bins=50)
     X, Y = np.meshgrid(xedges, yedges)
     fig = plt.figure()

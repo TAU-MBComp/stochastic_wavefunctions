@@ -12,9 +12,12 @@ import os
 import matplotlib.pyplot as plt
 import pickle
 import sys
+"""
+Given the sample points x and the values of the wavcefunction psi, generate permutations according ot the symmetry of the wavefunction. 
+"""
 
 
-def permute(x_init, y_init, perm, parity, d, n_particles):
+def permute(x_init, y_init, perm, parity, d, n_particles, bosonic):
     x_init = x_init.reshape(x_init.shape[0], n_particles, d)
     num_perm = len(parity)
     x_perm = np.copy(x_init)
@@ -23,7 +26,10 @@ def permute(x_init, y_init, perm, parity, d, n_particles):
         permutation = list(perm[p])
         x_p = np.take(x_init, permutation, axis=1)
         x_perm = np.append(x_perm, x_p, axis=0)
-        y_p = (-1)**(parity[p][0]) * y_init
+        if (bosonic):
+            y_p = (1)**(parity[p][0]) * y_init
+        else:
+            y_p = (-1)**(parity[p][0]) * y_init
         y_perm = np.append(y_perm, y_p)
     return x_perm.reshape(x_perm.shape[0], d * n_particles), y_perm
 
@@ -73,6 +79,11 @@ def get_neural_fitting_method(bosonic, U, n_samples, perm_subset, n_particles,
                                  reg=reg)
 
     return fitting_method
+
+
+"""
+Obtain a fit function, its Lagrangian and the probability distribution. 
+"""
 
 
 def fit_samples(x, psi, fitting_method, perm, parity, iteration):
@@ -165,7 +176,6 @@ def propagate_in_time(iteration, eval_psi0, eval_V, eval_I, load_weights, U,
                                                       nsamples,
                                                       decorrelation_steps,
                                                       uniform_ratio)
-        print("samples shape: ", samples.shape)
         x_t[:, :, i] = samples
         psi_t[:, i] = eval_psi(samples)
 
@@ -193,7 +203,8 @@ def propagate_in_time(iteration, eval_psi0, eval_V, eval_I, load_weights, U,
         subset.sort()
         perm = [perm[i] for i in subset]
         parity = [parity[i] for i in subset]
-        x, y = permute(samples, psi, perm, parity, dim_physical, n_particles)
+        x, y = permute(samples, psi, perm, parity, dim_physical, n_particles,
+                       bosonic)
 
         loss = 1
         while loss >= 1e-2 or math.isnan(loss):
@@ -219,8 +230,9 @@ def propagate_in_time(iteration, eval_psi0, eval_V, eval_I, load_weights, U,
         eval_psi = fit_psi
         eval_d2psi = fit_d2psi
         P = fit_P
-
-        # File output
+        """
+	Save intermediate output. 
+	"""
         results = {
             'x': x_t,
             't': t,
@@ -230,11 +242,11 @@ def propagate_in_time(iteration, eval_psi0, eval_V, eval_I, load_weights, U,
         }
         if bosonic == 1:
             output = "cutoff_{}_neural_{}_{}d_{}N_U={}.pkl".format(
-                perm_sub, 'bosons', dim_physical, n_particles, U)
+                perm_subset, 'bosons', dim_physical, n_particles, U)
             pickle.dump(results, open(output, "wb"))
         else:
             output = "cutoff_{}_neural_{}_{}d_{}N_U={}.pkl".format(
-                perm_sub, 'fermions', dim_physical, n_particles, U)
+                perm_subset, 'fermions', dim_physical, n_particles, U)
             pickle.dump(results, open(output, "wb"))
 
     print("total_time=", datetime.now() - start)
@@ -251,50 +263,51 @@ if __name__ == '__main__':
     omega = 1.0
     tmax = 1.0
     xmax = 5.0
-    offset = [2.0, -2.0]
+    offset = [0.0, 0.0]
     n_t = 100
     nsamples = 5000
     bosonic = False
     eta = 1e-2
     n_particles = 2
-    dim = 2
+    dim_physical = 2
 
-    # Generate data by sampling
     def wavefunction(x):
-        return ho.eigenfunction_samples(0, x, offset, hbar, m, omega, bosonic)
+        return ho.eigenfunction_samples(0, x, n_particles, dim_physical,
+                                        offset, hbar, m, omega, bosonic)
 
     def P0(x):
         return np.real(np.conj(wavefunction(x)) * wavefunction(x))
 
-    a = xmax
-    x0 = np.zeros(n_particles * dim)
-    step = np.full(n_particles * dim, xmax)
-    decorrelation_steps = 5
-    uniform_ratio = 0.3
+    x0 = np.zeros(n_particles * dim_physical)
+    step = np.full(n_particles * dim_physical, xmax)
+    decorrelation_steps = 10
+    uniform_ratio = 0.2
     samples = sample_distribution_Nd.sample_mixed(P0, x0, step, xmax, nsamples,
                                                   decorrelation_steps,
                                                   uniform_ratio)
 
     t = -1j * np.linspace(0, tmax, n_t)
     dt = t[1] - t[0]
+    """
+    Stochastic propagation with exact wavefunction. 
+    """
 
-    # Stochastic propagation with exact wavefunction
-    ################################################
     def eval_psi(x):
-        return ho.eigenfunction_samples(0, x, offset, hbar, m, omega, bosonic)
+        return ho.eigenfunction_samples(0, x, n_particles, dim_physical,
+                                        offset, hbar, m, omega, bosonic)
 
     def eval_d2psi(x, eta=1e-5):
         psi_ph = np.zeros(x.shape, dtype=complex)
         psi_mh = np.zeros(x.shape, dtype=complex)
-        for i in range(0, dim * n_particles):
+        for i in range(0, dim_physical * n_particles):
             x_ph = x.copy()
             x_mh = x.copy()
-            x_ph[i] += eta
-            x_mh[i] -= eta
-            psi_ph[i] = eval_psi(x_ph)
-            psi_mh[i] = eval_psi(x_mh)
-        return (psi_ph.sum(axis=0) + psi_mh.sum(axis=0) - 2 *
-                (dim * n_particles) * eval_psi(x)) / (eta**2)
+            x_ph[:, i] += eta
+            x_mh[:, i] -= eta
+            psi_ph[:, i] = wavefunction(x_ph)
+            psi_mh[:, i] = wavefunction(x_mh)
+        return (psi_ph.sum(axis=-1) + psi_mh.sum(axis=-1) - 2 *
+                (dim_physical * n_particles) * wavefunction(x)) / (eta**2)
 
     def eval_V(x):
         return ho.potential(x, m, omega)
@@ -304,10 +317,4 @@ if __name__ == '__main__':
 
     psi0 = eval_psi(samples)
     psi_t = propagate_samples(eval_psi, eval_d2psi, eval_V, eval_I, dt,
-                              samples, m, hbar, n_particles, dim)
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(samples[0], samples[2], np.real(psi0))
-    ax.scatter(samples[0], samples[2], np.real(psi_t))
-    plt.show()
+                              samples, m, hbar, n_particles, dim_physical)

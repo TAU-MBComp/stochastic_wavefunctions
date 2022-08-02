@@ -2,17 +2,6 @@ import numpy as np, matplotlib.pyplot as plt, harmonic_oscillator_Nd as ho
 from mpl_toolkits.mplot3d import Axes3D
 
 
-def sample_energy_fast(x_samples, psi, Hpsi, nsamples, xmax):
-
-    def P(x):
-        return np.real(np.conj(psi(x)) * psi(x))
-
-    E = np.conj(psi(x_samples)) * Hpsi(x_samples) / P(x_samples)
-    E_av = np.sum(E.real) / nsamples
-    mse = np.sum((E.real - E_av)**2) / nsamples
-    return (E_av, mse)
-
-
 def vec_sample_energy(psi,
                       d2psi,
                       Hpsi,
@@ -25,9 +14,9 @@ def vec_sample_energy(psi,
     def P(x):
         return np.real(np.conj(psi(x)) * psi(x))
 
-    vec_batch = 100  #100
-    nsamples = nsamples * 1  # 1
-    decorrelation_steps = decorrelation_steps * 1
+    vec_batch = 100
+    nsamples = nsamples
+    decorrelation_steps = decorrelation_steps
     x = np.random.rand(vec_batch, x0.shape[0])
     step = np.full(x.shape, xmax)
     Px = P(x)
