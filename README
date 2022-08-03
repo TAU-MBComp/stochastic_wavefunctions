@@ -1,0 +1,4 @@
+This is an algorithm that performs imaginary time propagation with a stochastic representation of many body quantum states.
+First pull from the GitHub directory: git@github.com:HristianaAtanasova/stochastic_wavefunctions_public.git
+Then open a tensorflow docker container: docker run --gpus all -it -v $PWD:/home -w /home --name naughty_feynman tensorflow/tensorflow:latest-gpu bash
+The parameters of the system can be adjusted in the params_Nd.py file and to run the imaginary time propagation call run.py 

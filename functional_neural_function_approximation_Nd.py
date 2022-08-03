@@ -178,15 +178,15 @@ if __name__ == '__main__':
     import harmonic_oscillator_Nd as ho
 
     # numerical parameters
-    nsamples = 5000
-    epochs = 200
-    batch_size = 128
+    nsamples = 20000
+    epochs = 2000
+    batch_size = 10*128
     reg = 1e-8
     h = 1e-2
     n_layers = 2
     layer_size = 4 * 128
     bosonic = False
-    perm_subset = 2
+    perm_subset = 4
     load_weights = 0
     iteration = 0
 
@@ -198,8 +198,8 @@ if __name__ == '__main__':
     omega = 1.0
     tmax = 1.0
     n_t = 100
-    offset = [-1.0, 1.0]
-    n_particles = 2
+    offset = [-1.0, 1.0, -1.0, 1.0]
+    n_particles = 4
     dim_physical = 2
 
     t = -1j * np.linspace(0, tmax, n_t)
@@ -242,7 +242,7 @@ if __name__ == '__main__':
         return -(hbar**2) / (2 * m) * wavefunction_d2(
             x, h) + eval_V(x) * wavefunction(x) + eval_I(x) * wavefunction(x)
 
-    x_max = 5.0
+    x_max = 10.0
     step = np.full(dim_physical * n_particles, x_max)
     x0 = np.zeros(dim_physical * n_particles)
     decorrelation_steps = 10
@@ -253,11 +253,11 @@ if __name__ == '__main__':
     samples = sample_mixed(P0, x0, step, x_max, nsamples, decorrelation_steps,
                            uniform_ratio)
     print("sampling time = ", datetime.now() - start)
-    energy_exact, mse_exact = sample_wavefunction_Nd.vec_sample_energy(
-        wavefunction, wavefunction_d2, Hpsi, x0, step, nsamples,
-        decorrelation_steps, x_max)
-    print("exact energy: ", energy_exact, "mse_exact: ", mse_exact)
-    print("sampling time = ", datetime.now() - start)
+    # energy_exact, mse_exact = sample_wavefunction_Nd.vec_sample_energy(
+    #     wavefunction, wavefunction_d2, Hpsi, x0, step, nsamples,
+    #     decorrelation_steps, x_max)
+    # print("exact energy: ", energy_exact, "mse_exact: ", mse_exact)
+    # print("sampling time = ", datetime.now() - start)
 
     psi = wavefunction(samples).real
     average_value = np.max(np.abs(psi))
@@ -298,7 +298,6 @@ if __name__ == '__main__':
         return -(hbar**2) / (2 * m) * eval_d2psi(x) + eval_V(x) * eval_psi(
             x) + eval_I(x) * eval_psi(x)
 
-    decorrelation_steps = 10
     energy, mse = sample_wavefunction_Nd.vec_sample_energy(
         eval_psi, eval_d2psi, Hpsi, x0, step, nsamples, decorrelation_steps,
         x_max)
