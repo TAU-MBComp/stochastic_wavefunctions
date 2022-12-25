@@ -206,16 +206,12 @@ def propagate_in_time(iteration, eval_psi0, eval_V, eval_I, load_weights, U,
         x, y = permute(samples, psi, perm, parity, dim_physical, n_particles,
                        bosonic)
 
-        loss = 1
-        while loss >= 1e-2 or math.isnan(loss):
-            print(f"loss is {loss}, trying to perform fit...")
-            analysis_data = {}
-            load_weights = 0
-            fitfunc, d2_fitfunc = fitting_method(x, y, perm, parity,
-                                                 analysis_data, i,
-                                                 load_weights)
-            history = analysis_data['history']
-            loss = history.history['loss'][-1]
+        analysis_data = {}
+        load_weights = 0
+        fitfunc, d2_fitfunc = fitting_method(x, y, perm, parity, analysis_data,
+                                             i, load_weights)
+        history = analysis_data['history']
+        loss = history.history['loss'][-1]
 
         def fit_psi(x):
             f = fitfunc(x)[:, 0]
@@ -241,14 +237,7 @@ def propagate_in_time(iteration, eval_psi0, eval_V, eval_I, load_weights, U,
             'energies_t': energies_t,
             'mse_t': mse_t,
         }
-        if bosonic == 1:
-            output = "cutoff_{}_neural_{}_{}d_{}N_U={}.pkl".format(
-                perm_subset, 'bosons', dim_physical, n_particles, U)
-            pickle.dump(results, open(output, "wb"))
-        else:
-            output = "cutoff_{}_neural_{}_{}d_{}N_U={}.pkl".format(
-                perm_subset, 'fermions', dim_physical, n_particles, U)
-            pickle.dump(results, open(output, "wb"))
+        pickle.dump(results, open("intermediate_results.pkl", "wb"))
 
     print("total_time=", datetime.now() - start)
     return x_t, psi_t, energies_t, mse_t
