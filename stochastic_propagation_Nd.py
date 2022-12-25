@@ -208,6 +208,7 @@ def propagate_in_time(iteration, eval_psi0, eval_V, eval_I, load_weights, U,
 
         loss = 1
         while loss >= 1e-2 or math.isnan(loss):
+            print(f"loss is {loss}, trying to perform fit...")
             analysis_data = {}
             load_weights = 0
             fitfunc, d2_fitfunc = fitting_method(x, y, perm, parity,

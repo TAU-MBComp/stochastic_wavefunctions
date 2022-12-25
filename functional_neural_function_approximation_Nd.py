@@ -180,7 +180,7 @@ if __name__ == '__main__':
     # numerical parameters
     nsamples = 20000
     epochs = 2000
-    batch_size = 10*128
+    batch_size = 10 * 128
     reg = 1e-8
     h = 1e-2
     n_layers = 2
@@ -253,11 +253,6 @@ if __name__ == '__main__':
     samples = sample_mixed(P0, x0, step, x_max, nsamples, decorrelation_steps,
                            uniform_ratio)
     print("sampling time = ", datetime.now() - start)
-    # energy_exact, mse_exact = sample_wavefunction_Nd.vec_sample_energy(
-    #     wavefunction, wavefunction_d2, Hpsi, x0, step, nsamples,
-    #     decorrelation_steps, x_max)
-    # print("exact energy: ", energy_exact, "mse_exact: ", mse_exact)
-    # print("sampling time = ", datetime.now() - start)
 
     psi = wavefunction(samples).real
     average_value = np.max(np.abs(psi))
