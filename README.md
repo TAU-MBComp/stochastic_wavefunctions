@@ -25,4 +25,4 @@ docker run --gpus all -it --rm -v $PWD:/workspace -w /workspace stoc_wf python .
 ```
 
 The parameters of the system can be adjusted in the `params.py` file, and
-running 'python plot_results.py' will show a convergence plot for energy.
+running `python plot_results.py` will show a convergence plot for energy.
